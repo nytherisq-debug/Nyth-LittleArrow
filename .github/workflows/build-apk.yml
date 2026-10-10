@@ -1,166 +1,169 @@
 name: Build Nyth Atom APK
 
-on: [workflow_dispatch]
+'on':
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-name: Build, Sign and Verify APK
-runs-on: ubuntu-22.04
-timeout-minutes: 45
+  build:
+    name: Build and Verify Nyth Atom
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
 
-steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Set up Java 17
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '17'
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-  - name: Install system dependencies
-    shell: bash
-    run: |
-      set -euo pipefail
-      sudo apt-get update
-      sudo apt-get install -y curl unzip zip python3 openssl ca-certificates
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl unzip zip python3 openssl
 
-  - name: Install Android SDK command-line tools
-    shell: bash
-    run: |
-      set -euo pipefail
+      - name: Install Android SDK tools
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      SDK_ROOT="$RUNNER_TEMP/android-sdk"
-      mkdir -p "$SDK_ROOT/cmdline-tools"
+          SDK="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
 
-      curl -fL --retry 3 \
-        "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
-        -o "$RUNNER_TEMP/cmdline-tools.zip"
+          curl -fL --retry 3 \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+            -o "$RUNNER_TEMP/cmdline-tools.zip"
 
-      mkdir -p "$RUNNER_TEMP/sdk-extract"
-      unzip -q "$RUNNER_TEMP/cmdline-tools.zip" -d "$RUNNER_TEMP/sdk-extract"
+          mkdir -p "$RUNNER_TEMP/sdk-extract"
+          unzip -q "$RUNNER_TEMP/cmdline-tools.zip" \
+            -d "$RUNNER_TEMP/sdk-extract"
 
-      mkdir -p "$SDK_ROOT/cmdline-tools/latest"
-      cp -a "$RUNNER_TEMP/sdk-extract/cmdline-tools/." \
-        "$SDK_ROOT/cmdline-tools/latest/"
+          mkdir -p "$SDK/cmdline-tools/latest"
+          cp -a "$RUNNER_TEMP/sdk-extract/cmdline-tools/." \
+            "$SDK/cmdline-tools/latest/"
 
-      echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-      echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-      echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-      echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-      echo "$SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK/build-tools/35.0.0" >> "$GITHUB_PATH"
 
-  - name: Install SDK packages
-    shell: bash
-    run: |
-      set -euo pipefail
+      - name: Install SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-        --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 
-      "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-        --sdk_root="$ANDROID_HOME" \
-        --install \
-        "platform-tools" \
-        "platforms;android-35" \
-        "build-tools;35.0.0"
+          yes | "$SDKMANAGER" \
+            --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
 
-      test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
-      test -x "$ANDROID_HOME/build-tools/35.0.0/zipalign"
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-  - name: Install apktool
-    shell: bash
-    run: |
-      set -euo pipefail
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/zipalign"
 
-      curl -fL --retry 3 \
-        "https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar" \
-        -o "$RUNNER_TEMP/apktool.jar"
+      - name: Install apktool
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      sudo install -m 644 "$RUNNER_TEMP/apktool.jar" \
-        /usr/local/bin/apktool.jar
+          curl -fL --retry 3 \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar" \
+            -o "$RUNNER_TEMP/apktool.jar"
 
-      printf '#!/usr/bin/env sh\nexec java -jar /usr/local/bin/apktool.jar "$@"\n' \
-        | sudo tee /usr/local/bin/apktool >/dev/null
+          sudo install -m 644 "$RUNNER_TEMP/apktool.jar" \
+            /usr/local/bin/apktool.jar
 
-      sudo chmod 755 /usr/local/bin/apktool
-      apktool --version
+          printf '#!/usr/bin/env sh\nexec java -jar /usr/local/bin/apktool.jar "$@"\n' \
+            | sudo tee /usr/local/bin/apktool >/dev/null
 
-  - name: Check and extract patch project
-    shell: bash
-    run: |
-      set -euo pipefail
+          sudo chmod 755 /usr/local/bin/apktool
+          apktool --version
 
-      test -s NythAtom_patch_project.zip
+      - name: Extract patch project
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      mkdir -p "$RUNNER_TEMP/nyth-source"
-      unzip -q NythAtom_patch_project.zip -d "$RUNNER_TEMP/nyth-source"
+          test -s NythAtom_patch_project.zip
 
-      PROJECT="$RUNNER_TEMP/nyth-source/nyth"
+          mkdir -p "$RUNNER_TEMP/nyth-source"
+          unzip -q NythAtom_patch_project.zip \
+            -d "$RUNNER_TEMP/nyth-source"
 
-      test -f "$PROJECT/build.sh"
-      test -f "$PROJECT/apply_patch.py"
-      test -f "$PROJECT/tools/make_assets.py"
-      test -f "$PROJECT/backup/ZenoATom_7_0.apk"
-      test -f "$PROJECT/backup/SHA256SUMS.txt"
+          PROJECT="$RUNNER_TEMP/nyth-source/nyth"
 
-      echo "NYTH_PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          test -f "$PROJECT/build.sh"
+          test -f "$PROJECT/apply_patch.py"
+          test -f "$PROJECT/tools/make_assets.py"
+          test -f "$PROJECT/backup/ZenoATom_7_0.apk"
+          test -f "$PROJECT/backup/SHA256SUMS.txt"
 
-  - name: Verify original APK
-    shell: bash
-    run: |
-      set -euo pipefail
-      cd "$NYTH_PROJECT"
-      sha256sum -c backup/SHA256SUMS.txt
+          echo "NYTH_PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
-  - name: Check Python syntax
-    shell: bash
-    run: |
-      set -euo pipefail
-      cd "$NYTH_PROJECT"
-      python3 -m py_compile apply_patch.py tools/make_assets.py
+      - name: Verify original APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$NYTH_PROJECT"
+          sha256sum -c backup/SHA256SUMS.txt
 
-  - name: Create temporary signing password
-    shell: bash
-    run: |
-      set -euo pipefail
-      echo "NYTH_KS_PASS=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Check patcher syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$NYTH_PROJECT"
+          python3 -m py_compile \
+            apply_patch.py tools/make_assets.py
 
-  - name: Build APK
-    shell: bash
-    run: |
-      set -euo pipefail
-      cd "$NYTH_PROJECT"
+      - name: Prepare signing password
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "NYTH_KS_PASS=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
 
-      chmod +x build.sh
-      ./build.sh
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$NYTH_PROJECT"
 
-      APK="build/NythAtom-7.0-nyth1-signed.apk"
-      test -s "$APK"
-      ls -lh "$APK"
+          chmod +x build.sh
+          ./build.sh
 
-  - name: Verify signature and alignment
-    shell: bash
-    run: |
-      set -euo pipefail
+          APK="build/NythAtom-7.0-nyth1-signed.apk"
+          test -s "$APK"
+          ls -lh "$APK"
 
-      APK="$NYTH_PROJECT/build/NythAtom-7.0-nyth1-signed.apk"
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-        verify --verbose --print-certs "$APK"
+          APK="$NYTH_PROJECT/build/NythAtom-7.0-nyth1-signed.apk"
 
-      "$ANDROID_HOME/build-tools/35.0.0/zipalign" \
-        -c -v 4 "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            verify --verbose --print-certs "$APK"
 
-      sha256sum "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" \
+            -c -v 4 "$APK"
 
-  - name: Upload installable APK artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: NythAtom-APK
-      path: ${{ runner.temp }}/nyth-source/nyth/build/NythAtom-7.0-nyth1-signed.apk
-      if-no-files-found: error
-      retention-days: 7
+          sha256sum "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NythAtom-APK
+          path: ${{ runner.temp }}/nyth-source/nyth/build/NythAtom-7.0-nyth1-signed.apk
+          if-no-files-found: error
+          retention-days: 7
