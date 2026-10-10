@@ -1,6 +1,4 @@
-name: Build Nyth Atom APK
-
-on:
+"on":
 workflow_dispatch:
 push:
 branches:
