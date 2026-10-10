@@ -1,14 +1,112 @@
-- name: Set up Android SDK
-    uses: android-actions/setup-android@v3
-    with:
-      packages: |
-        platform-tools
-        platforms;android-35
-        build-tools;35.0.0
+name: Build Nyth Atom APK
 
-  - name: Install Android build tools
+on:
+workflow_dispatch:
+
+permissions:
+contents: read
+
+jobs:
+build:
+runs-on: ubuntu-22.04
+timeout-minutes: 30
+
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+
+  - name: Set up Java 17
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
+
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
+
+  - name: Install Android SDK packages
+    shell: bash
     run: |
       set -euo pipefail
-      sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      yes | sdkmanager --licenses >/dev/null || true
+
+      sdkmanager --install \
+        "platform-tools" \
+        "platforms;android-35" \
+        "build-tools;35.0.0"
+
       echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
       echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+  - name: Install apktool
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      curl -fL --retry 3 \
+        "https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar" \
+        -o /tmp/apktool.jar
+
+      sudo install -m 644 /tmp/apktool.jar /usr/local/bin/apktool.jar
+
+      printf '#!/usr/bin/env sh\nexec java -jar /usr/local/bin/apktool.jar "$@"\n' \
+        | sudo tee /usr/local/bin/apktool >/dev/null
+
+      sudo chmod 755 /usr/local/bin/apktool
+      apktool --version
+
+  - name: Extract patch project
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      test -f NythAtom_patch_project.zip
+      unzip -q NythAtom_patch_project.zip -d .
+
+      test -f nyth/build.sh
+      test -f nyth/apply_patch.py
+      test -f nyth/backup/ZenoATom_7_0.apk
+
+  - name: Check original APK integrity
+    shell: bash
+    run: |
+      set -euo pipefail
+      cd nyth
+      sha256sum -c backup/SHA256SUMS.txt
+
+  - name: Check Python syntax
+    shell: bash
+    run: |
+      set -euo pipefail
+      cd nyth
+      python3 -m py_compile apply_patch.py tools/make_assets.py
+
+  - name: Create temporary signing password
+    shell: bash
+    run: |
+      set -euo pipefail
+      echo "NYTH_KS_PASS=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+
+  - name: Build, sign, and verify APK
+    shell: bash
+    run: |
+      set -euo pipefail
+      cd nyth
+
+      chmod +x build.sh
+      ./build.sh
+
+      APK="build/NythAtom-7.0-nyth1-signed.apk"
+      test -s "$APK"
+
+      apksigner verify --verbose --print-certs "$APK"
+      zipalign -c -v 4 "$APK"
+
+  - name: Upload installable APK artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: NythAtom-APK
+      path: nyth/build/NythAtom-7.0-nyth1-signed.apk
+      if-no-files-found: error
+      retention-days: 7
