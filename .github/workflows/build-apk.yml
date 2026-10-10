@@ -1,18 +1,9 @@
-"on":
-workflow_dispatch:
-push:
-branches:
-- main
-paths:
-- '.github/workflows/build-apk.yml'
-- 'NythAtom_patch_project.zip'
+name: Build Nyth Atom APK
+
+on: [workflow_dispatch]
 
 permissions:
 contents: read
-
-concurrency:
-group: nyth-atom-build
-cancel-in-progress: false
 
 jobs:
 build:
@@ -33,46 +24,39 @@ steps:
     with:
       distribution: temurin
       java-version: '17'
-      cache: maven
 
   - name: Install system dependencies
     shell: bash
     run: |
       set -euo pipefail
       sudo apt-get update
-      sudo apt-get install -y \
-        curl unzip zip python3 openssl ca-certificates
+      sudo apt-get install -y curl unzip zip python3 openssl ca-certificates
 
-  - name: Locate Android SDK tools
+  - name: Locate Android SDK manager
     shell: bash
     run: |
       set -euo pipefail
-
       SDKMANAGER="$(find /usr/local/lib/android/sdk \
         -type f -path '*/bin/sdkmanager' -print -quit 2>/dev/null || true)"
 
       if [ -z "$SDKMANAGER" ]; then
-        echo "::error::Android SDK sdkmanager not found on runner."
+        echo "::error::Android SDK manager not found"
         exit 1
       fi
 
       echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
       echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-      echo "Found sdkmanager: $SDKMANAGER"
 
   - name: Install Android SDK packages
     shell: bash
     run: |
       set -euo pipefail
-
       mkdir -p "$ANDROID_HOME"
 
       yes | "$SDKMANAGER" \
         --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
 
-      "$SDKMANAGER" \
-        --sdk_root="$ANDROID_HOME" \
-        --install \
+      "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
         "platform-tools" \
         "platforms;android-35" \
         "build-tools;35.0.0"
@@ -84,13 +68,11 @@ steps:
     shell: bash
     run: |
       set -euo pipefail
-
       curl -fL --retry 3 \
         "https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar" \
         -o /tmp/apktool.jar
 
-      sudo install -m 644 /tmp/apktool.jar \
-        /usr/local/bin/apktool.jar
+      sudo install -m 644 /tmp/apktool.jar /usr/local/bin/apktool.jar
 
       printf '#!/usr/bin/env sh\nexec java -jar /usr/local/bin/apktool.jar "$@"\n' \
         | sudo tee /usr/local/bin/apktool >/dev/null
@@ -98,24 +80,14 @@ steps:
       sudo chmod 755 /usr/local/bin/apktool
       apktool --version
 
-  - name: Check required files
-    shell: bash
-    run: |
-      set -euo pipefail
-
-      test -s NythAtom_patch_project.zip
-
-      echo "Patch archive found."
-      unzip -l NythAtom_patch_project.zip
-
   - name: Extract patch project
     shell: bash
     run: |
       set -euo pipefail
 
+      test -s NythAtom_patch_project.zip
       mkdir -p "$RUNNER_TEMP/nyth-source"
-      unzip -q NythAtom_patch_project.zip \
-        -d "$RUNNER_TEMP/nyth-source"
+      unzip -q NythAtom_patch_project.zip -d "$RUNNER_TEMP/nyth-source"
 
       PROJECT="$RUNNER_TEMP/nyth-source/nyth"
 
@@ -157,23 +129,19 @@ steps:
 
       APK="build/NythAtom-7.0-nyth1-signed.apk"
       test -s "$APK"
-
-      echo "APK created: $APK"
       ls -lh "$APK"
 
   - name: Verify APK signature and alignment
     shell: bash
     run: |
       set -euo pipefail
-
       APK="$NYTH_PROJECT/build/NythAtom-7.0-nyth1-signed.apk"
 
       apksigner verify --verbose --print-certs "$APK"
       zipalign -c -v 4 "$APK"
-
       sha256sum "$APK"
 
-  - name: Upload installable APK
+  - name: Upload APK artifact
     uses: actions/upload-artifact@v4
     with:
       name: NythAtom-APK
